@@ -4,7 +4,101 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 )
+
+type candidates struct {
+	kind string
+	isCandidate map[int]struct{}
+	rating uint64
+}
+
+type keepFn func(bitAtPos byte, more0, more1 bool) bool
+
+type counts struct{ n0, n1 int }
+
+func newCandidates(kind string, size int) *candidates {
+	c := &candidates{
+		kind: kind,
+		isCandidate: make(map[int]struct{}, size),
+	}
+	for idx := 0; idx < size; idx++ {
+		c.isCandidate[idx] = struct{}{}
+	}
+	return c
+}
+
+func (c *candidates) countBits(lines []string) []counts {
+	var bitCounts []counts
+	for idx, bin := range lines {
+		_, isCand := c.isCandidate[idx]
+		if bin == "" || !isCand {
+			continue
+                }
+
+		sz := len(bin)
+		for len(bitCounts) < sz {
+			bitCounts = append(bitCounts, counts{})
+                }
+                for pos := sz-1; pos >= 0; pos-- {
+                        if bin[pos] == '0' {
+                                bitCounts[pos].n0++;
+                        } else if bin[pos] == '1' {
+                                bitCounts[pos].n1++;
+                        }
+                }
+	}
+	return bitCounts
+}
+
+func (c *candidates) filter(lines []string, pos int, k keepFn) bool {
+	bitCounts := c.countBits(lines)
+
+	for idx, bin := range lines {
+		_, isCand := c.isCandidate[idx]
+                if !isCand {
+                        continue
+                }
+
+                bitAtPos := bin[pos]
+                cnt := bitCounts[pos]
+		more0, more1 := cnt.n0>cnt.n1, cnt.n1>cnt.n0
+
+		log.Printf(" --- line %02d %q pos %d: bit=%q, counts.n0=%d,.n1=%d\n", idx, bin, pos, bitAtPos, cnt.n0, cnt.n1)
+
+		if (!k(bitAtPos, more0, more1)) {
+			equal := cnt.n0==cnt.n1
+			log.Printf("  +- more0=%t more1=%t equal=%t bit=%q - removing %s cand %q\n", more0, more1, equal, bitAtPos, c.kind, bin)
+                        delete(c.isCandidate, idx)
+		}
+
+		if len(c.isCandidate) == 1 {
+			ratingBin := ""
+			for idx := range c.isCandidate {
+				ratingBin = lines[idx]
+			}
+			rating, err := strconv.ParseUint(ratingBin, 2, 32)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("%s rating: %s (%d)\n", c.kind, ratingBin, rating)
+			c.rating = rating
+			return false
+		}
+        }
+	return true
+}
+
+func (c *candidates) dump(pos int, lines []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "After considering bit position %d, remaining %s cands are:\n", pos, c.kind)
+	for idx := range c.isCandidate {
+		fmt.Fprintf(&b, " %s", lines[idx])
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -16,75 +110,32 @@ func main() {
 	}
 	log.Printf("Read %d input lines", len(lines))
 
-	type counts struct{ n0, n1 int }
-	var bitCounts []counts
+	oxyCands := newCandidates("oxy", len(lines))
+	co2Cands := newCandidates("co2", len(lines))
 
-	for _, bin := range lines {
-		if bin == "" {
-			continue
+	pos := 0
+	for {
+		more := oxyCands.filter(lines, pos, func(bitAtPos byte, more0, more1 bool) bool {
+			return (bitAtPos == '0' && more0) || (bitAtPos == '1' && !more0)
+		})
+		log.Println(oxyCands.dump(pos, lines))
+		if !more {
+			break
 		}
-		sz := len(bin)
-		for len(bitCounts) < sz {
-			bitCounts = append(bitCounts, counts{})
-		}
-		for pos := sz-1; pos >= 0; pos-- {
-			if bin[pos] == '0' {
-				bitCounts[pos].n0++;
-			} else if bin[pos] == '1' {
-				bitCounts[pos].n1++;
-			}
-		}
+		pos++
 	}
 
-	oxyCandidates, co2Candidates := map[int]struct{}{}, map[int]struct{}{}
-	for idx := range lines {
-		oxyCandidates[idx] = struct{}{}
-		co2Candidates[idx] = struct{}{}
-	}
-outer:
-	for pos, counts := range bitCounts {
-		for idx, bin := range lines {
-			_, isOxyCandidate := oxyCandidates[idx]
-			_, isCo2Candidate := co2Candidates[idx]
-			if !isOxyCandidate && !isCo2Candidate {
-				continue
-			}
-			bitAtPos := bin[pos]
-			more0, more1, equal := counts.n0>counts.n1, counts.n1>counts.n0, counts.n0==counts.n1
-			matchesMostCommonOrEqually1 :=
-				(bitAtPos == '0' && more0) || (bitAtPos == '1' && !more0)
-			matchesLeastCommonOrEqually0 :=
-				(bitAtPos == '0' && !more0) || (bitAtPos == '1' && more0)
-
-			//fmt.Printf("considering line %02d %q pos %d: bit=%q, counts.n0=%d,.n1=%d\n", idx, bin, pos, bitAtPos, counts.n0, counts.n1)
-			if isOxyCandidate && !matchesMostCommonOrEqually1 && (len(oxyCandidates) > 1) {
-				fmt.Printf("   more0=%t more1=%t equal=%t bit=%q - removing Oxy cand %q\n", more0, more1, equal, bitAtPos, bin)
-				delete(oxyCandidates, idx)
-			}
-			if isCo2Candidate && !matchesLeastCommonOrEqually0 && (len(co2Candidates) > 1) {
-				fmt.Printf("   more0=%t more1=%t equal=%t bit=%q - removing Co2 cand %q\n", more0, more1, equal, bitAtPos, bin)
-				delete(co2Candidates, idx)
-			}
-			if len(oxyCandidates) == 1 && len(co2Candidates) == 1 {
-				fmt.Println("\nAborting search, we're done to one for each")
-				break outer
-			}
+	pos = 0
+	for {
+		more := co2Cands.filter(lines, pos, func(bitAtPos byte, more0, more1 bool) bool {
+                        return (bitAtPos == '0' && !more1) || (bitAtPos == '1' && more0)
+                })
+		log.Println(co2Cands.dump(pos, lines))
+		if !more {
+			break
 		}
-		fmt.Printf("\n\nat end of considering bit position pos, remaining oxy cands are:\n")
-		for idx := range oxyCandidates {
-			fmt.Printf(" %s", lines[idx])
-		}
-		fmt.Printf("\n\nat end of considering bit position pos, remaining co2 cands are:\n")
-		for idx := range co2Candidates {
-                        fmt.Printf(" %s", lines[idx])
-                }
-		fmt.Println("\n")
+		pos++
 	}
-
-	for idx := range oxyCandidates {
-		fmt.Printf("oxygen generator rating = %v (idx %d)\n", lines[idx], idx)
-	}
-	for idx := range co2Candidates {
-		fmt.Printf("co2 scrubber rating = %v (idx %d)\n", lines[idx], idx)
-	}
+	fmt.Printf("Rating product = %v\n", oxyCands.rating*co2Cands.rating)
 }
+
