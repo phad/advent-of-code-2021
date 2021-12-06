@@ -133,13 +133,19 @@ func main() {
 
 	log.Printf("Read %v boards", len(boards))
 
+	bingos := map[int]bool{}
 	for _, drawn := range numbersDrawn {
 		// mark all boards
 		for idx, board := range boards {
 			board.mark(drawn)
 			if board.isBingo() {
+				bingos[idx] = true
 				unmarkedSum := board.unmarkedSum()
 				fmt.Printf("Board %d, Drawn %d: BINGO! Unmarked sum %d, Product %d\n", idx, drawn, unmarkedSum, drawn*unmarkedSum)
+				if len(bingos) == len(boards) {
+					fmt.Println("All boards are BINGO - stopping.")
+					os.Exit(0)
+				}
 			}
 		}
 	}
