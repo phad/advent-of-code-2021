@@ -128,7 +128,7 @@ func main() {
 	pos = 0
 	for {
 		more := co2Cands.filter(lines, pos, func(bitAtPos byte, more0, more1 bool) bool {
-                        return (bitAtPos == '0' && !more1) || (bitAtPos == '1' && more0)
+                        return (bitAtPos == '0' && !more0) || (bitAtPos == '1' && more0)
                 })
 		log.Println(co2Cands.dump(pos, lines))
 		if !more {
